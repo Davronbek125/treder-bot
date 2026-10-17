@@ -1,0 +1,11 @@
+services:
+  treder-bot:
+    build: .
+    container_name: treder_bot_prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Tashkent
