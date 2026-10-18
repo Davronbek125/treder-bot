@@ -89,8 +89,7 @@ def format_signal(sig: Dict[str, Any]) -> str:
             f"• TP3 da foyda: <b>+{_usd(r['tp3_profit'])}</b>",
         ])
         if r["min_lot_exceeds_risk"]:
-            lines.append(f"⚠️ <i>Minimal lot (0.01) belgilangan {r['risk_percent']}% riskdan ko'p zarar "
-                         "keltiradi. Depozit kichik - ehtiyot bo'ling yoki signalni o'tkazib yuboring.</i>")
+            lines.append(_risk_warning(r))
         lines.append("💡 <i>TP1 ga yetganda yarmini yoping, SL ni O'ZGARTIRMANG (BE ga surmang) — qolgani TP2/TP3 ni nishonga oladi.</i>")
         lines.append("")
         
@@ -191,11 +190,25 @@ def format_smc(smc: Dict[str, Any], price: float, timeframe: str, offset: float 
 
 
 SCALP_WARNING = (
-    "🧪 <b>M1 SKALPING SIGNALI</b>\n"
-    "<i>1 yillik backtest: spread ≤0.40$ da bo'laklarning hammasi musbat, PF ~1.1. "
-    "Spread 0.80$ ga yaqinlashsa ustunlik yo'qoladi — brokeringiz spreadini "
-    "tekshiring. Kafolat yo'q.</i>"
+    "🧪 <b>Diqqat — ustunlik yupqa:</b>\n"
+    "<i>1 yillik backtest: spread ≤0.40$ da 5 bo'lakning hammasi musbat, PF ~1.1. "
+    "Spread 0.80$ ga yaqinlashsa ustunlik yo'qoladi — brokeringiz spreadini tekshiring. "
+    "Kafolat yo'q.</i>"
 )
+
+
+def _risk_warning(r: Dict[str, Any]) -> str:
+    """0.01 lot belgilangan riskdan katta bo'lsa — aniq foiz bilan qattiq ogohlantiradi."""
+    loss = float(r.get("actual_sl_loss") or 0.0)
+    balance = float(r.get("balance") or 0.0)
+    pct = (loss / balance * 100.0) if balance > 0 else 0.0
+    return (
+        "🚨 <b>DIQQAT: 0.01 LOT RISKDAN ANCHA KATTA!</b>\n"
+        f"<i>0.01 lot bilan SL da zarar <b>-{_usd(loss)}</b> = depozitning <b>{pct:.1f}%</b> "
+        f"(belgilangan risk: {r['risk_percent']}%).\n"
+        "Bu bitimni ochish juda xavfli. Depozitni ko'paytiring, aks holda signalni "
+        "o'tkazib yuboring.</i>"
+    )
 
 
 def format_scalp_signal(sig: Dict[str, Any]) -> str:
@@ -241,7 +254,7 @@ def format_scalp_signal(sig: Dict[str, Any]) -> str:
             f"• TP da foyda: <b>+{_usd(r['tp1_profit'])}</b>",
         ])
         if r["min_lot_exceeds_risk"]:
-            lines.append(f"⚠️ <i>Minimal lot (0.01) belgilangan riskdan ko'p zarar keltiradi.</i>")
+            lines.append(_risk_warning(r))
     else:
         lines.append("📈 <i>Hozircha aniq M1 skalping setupi yo'q. Birozdan so'ng qayta urinib ko'ring.</i>")
 
@@ -254,7 +267,7 @@ def format_scalp_signal(sig: Dict[str, Any]) -> str:
 
 
 def format_calc(cfg: Dict[str, Any], price: float, risk: Dict[str, Any]) -> str:
-    return "\n".join([
+    lines = [
         "🛡 <b>XAUUSD RISK VA LOT KALKULYATORI</b>",
         "",
         f"💵 <b>Narx:</b> <code>{_usd(price)}</code>",
@@ -267,9 +280,14 @@ def format_calc(cfg: Dict[str, Any], price: float, risk: Dict[str, Any]) -> str:
         f"• TP1 foyda: <b>+{_usd(risk['tp1_profit'])}</b>",
         f"• TP2 foyda: <b>+{_usd(risk['tp2_profit'])}</b>",
         f"• TP3 foyda: <b>+{_usd(risk['tp3_profit'])}</b>",
+    ]
+    if risk.get("min_lot_exceeds_risk"):
+        lines.extend(["", _risk_warning(risk)])
+    lines.extend([
         "",
         "Depozit yoki riskni tanlang:",
     ])
+    return "\n".join(lines)
 
 
 def format_performance(stats: Dict[str, Any]) -> str:

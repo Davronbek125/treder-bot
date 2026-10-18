@@ -45,6 +45,31 @@ def test_min_lot_warning_flag():
     assert tiny["min_lot_exceeds_risk"] is True
 
 
+def test_min_lot_warning_shows_concrete_percent():
+    """Ogohlantirish quruq matn emas — haqiqiy foizni ko'rsatishi kerak."""
+    # 100$ depozit, 10$ SL, 0.01 lot -> zarar 10$ = depozitning 10%
+    risk = risk_service.calculate_lot_size(100.0, 1.0, 4140.0, 4130.0, 4150.0, 4160.0, 4170.0)
+    text = format_calc({"balance": 100.0, "risk_percent": 1.0}, 4140.0, risk)
+    assert "RISKDAN ANCHA KATTA" in text
+    assert "10.0%" in text
+    assert "-10.00$" in text
+
+
+def test_big_deposit_has_no_min_lot_warning():
+    risk = risk_service.calculate_lot_size(10000.0, 1.0, 4140.0, 4135.0, 4147.5, 4152.5, 4160.0)
+    text = format_calc({"balance": 10000.0, "risk_percent": 1.0}, 4140.0, risk)
+    assert "RISKDAN ANCHA KATTA" not in text
+
+
+def test_signal_warns_about_small_deposit():
+    """Kichik depozitda signal ham aniq ogohlantirishi kerak."""
+    tech, smc = bullish_setup()
+    sig = evaluate(tech, smc, "BULLISH (O'sish)", NEWS_SAFE, 4140.0, "15m", balance=100.0)
+    text = format_signal(sig)
+    assert "RISKDAN ANCHA KATTA" in text
+    assert "depozitning" in text
+
+
 def _scalp_sig(action="BUY"):
     risk = risk_service.calculate_lot_size(1000.0, 1.0, 4140.0, 4138.0, 4145.0, 4145.0, 4145.0)
     return {
