@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from services.signal_generator import _levels, evaluate
+from services.signal_generator import _levels, evaluate, sl_floor_atr
 from services.ensemble import ensemble_service
 
 NEWS_SAFE = {"safe_to_trade": True, "status_text": "SAFE", "recommendation": "", "calendar_ok": True}
@@ -83,23 +83,48 @@ def test_offset_shifts_all_levels_equally():
 
 
 def test_levels_risk_reward_ratios():
-    lv = _levels("BUY", 4140.0, 4.0, make_smc())
+    lv = _levels("BUY", 4140.0, 4.0, make_smc(), "1h")
     sl_dist = 4140.0 - lv["stop_loss"]
-    # SMC daraja yo'q -> minimal SL: MIN_SL_ATR_MULT * ATR = 3.5 * 4
-    assert sl_dist == pytest.approx(14.0)
+    # SMC daraja yo'q -> minimal SL: sl_floor_atr(tf) * ATR
+    assert sl_dist == pytest.approx(sl_floor_atr("1h") * 4.0, abs=0.02)
     assert lv["tps"][0] - 4140.0 == pytest.approx(sl_dist * 1.5, abs=0.02)
     assert lv["tps"][2] - 4140.0 == pytest.approx(sl_dist * 4.0, abs=0.02)
 
 
-def test_levels_stop_outside_noise_band():
-    """SL hech qachon 3.5*ATR dan torroq bo'lmasligi kerak (shovqin zonasi)."""
-    # Yaqin SMC daraja (1.5 ATR) -> floor qo'llaniladi
-    near = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4134.0]))  # 6$ = 1.5 ATR
-    assert 4140.0 - near["stop_loss"] == pytest.approx(14.0)
+def test_sl_floor_scales_with_hold_horizon():
+    """Floor ushlash gorizontiga qarab o'zgaradi va bir xil dollar SL beradi.
 
-    # Uzoq SMC daraja (3.4 ATR) -> struktura hurmat qilinadi
-    far = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4126.4]))  # 13.6$ = 3.4 ATR
-    assert 4140.0 - far["stop_loss"] == pytest.approx(13.6 + 0.3 * 4.0)
+    24 soatlik ushlashda: 15m -> 96 sham (8.0 ATR), 1h -> 24 sham (~4.0), 4h -> 6 sham (~2.0).
+    Backtest: 1h optimal 4.0 ATR; 15m OOS bo'yicha 6-8 ATR eng barqaror.
+    """
+    assert sl_floor_atr("1h") == pytest.approx(0.82 * 24 ** 0.5, abs=0.01)
+    assert sl_floor_atr("1h") == pytest.approx(4.02, abs=0.02)
+    assert sl_floor_atr("15m") == pytest.approx(8.0, abs=0.02)  # 8.03 -> eng katta qiymatga qisqaradi
+    assert sl_floor_atr("4h") == pytest.approx(0.82 * 6 ** 0.5, abs=0.01)
+    # 5m (288 sham) nazariy ~13.9 ATR -> ruxsat etilgan maksimumga qisqartiriladi
+    assert sl_floor_atr("5m") == pytest.approx(8.0)
+    # taymfreym berilmasa - config.DEFAULT_TIMEFRAME (1h)
+    assert sl_floor_atr() == pytest.approx(sl_floor_atr("1h"))
+
+
+def test_sl_floor_config_override_wins(monkeypatch):
+    """config.MIN_SL_ATR_MULT son bo'lsa - avtomatik formula o'rniga o'sha qiymat."""
+    monkeypatch.setattr("config.settings.MIN_SL_ATR_MULT", 3.0)
+    assert sl_floor_atr("15m") == pytest.approx(3.0)
+    monkeypatch.setattr("config.settings.MIN_SL_ATR_MULT", 0.0)
+    assert sl_floor_atr("1h") == pytest.approx(0.0)
+
+
+def test_levels_stop_outside_noise_band():
+    """SL hech qachon floor*ATR dan torroq bo'lmasligi kerak (shovqin zonasi)."""
+    floor = sl_floor_atr("15m") * 4.0
+    # Yaqin SMC daraja (1.5 ATR) -> floor qo'llaniladi
+    near = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4134.0]), "15m")  # 6$ = 1.5 ATR
+    assert 4140.0 - near["stop_loss"] == pytest.approx(floor, abs=0.02)
+
+    # 4h da floor ~2 ATR; undan uzoq SMC tuzilma hurmat qilinadi
+    far = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4126.4]), "4h")  # 13.6$ = 3.4 ATR
+    assert 4140.0 - far["stop_loss"] == pytest.approx(13.6 + 0.3 * 4.0, abs=0.02)
 
 
 def test_daily_without_htf_is_normalized():

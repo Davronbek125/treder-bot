@@ -15,8 +15,15 @@ MUHIM (jonli tizim bilan aynan moslik):
 - Yangiliklar filtri tarixda qo'llanmaydi.
 
 EXIT MODELLARI:
-- `tp1`  : TP1 da to'liq yopiladi (konservativ pastki chegara).
-- `live` : jonli bot kabi - TP1 da 50% yopiladi, SL BE ga suriladi, qolgani TP2/TP3 (yoki BE).
+- `tp1`       : TP1 da to'liq yopiladi (konservativ pastki chegara).
+- `live`      : ESKI jonli xatti-harakat - TP1 da 50%, SL BE ga suriladi (solishtirish uchun).
+- `half_hold` : YANGI jonli xatti-harakat - TP1 da 50%, SL O'ZGARMAYDI, qolgani TP2/TP3/SL/TIME.
+
+SL JOYLASHUVI:
+- `--sl-atr K` : SL masofasi kamida K*ATR bo'ladi. Berilmasa — ishlab chiqarishdagi
+  AVTOMATIK floor: K ~ 0.82*sqrt(ushlash shamchalari soni), ya'ni 1h/24h -> ~4.0 ATR,
+  15m/24h -> ~8.0 ATR. Bu turli taymfreymlarda bir xil dollar SL beradi.
+- Kesh toza bo'lishi uchun yig'ish vaqtida floor vaqtincha o'chiriladi (--refresh ham).
 
 Natijalar o'tmishni ko'rsatadi, kelajakka kafolat EMAS.
 """
@@ -32,7 +39,7 @@ import pandas as pd  # noqa: E402
 
 from config import settings  # noqa: E402
 from services.market_data import fetch_history  # noqa: E402
-from services.signal_generator import HTF_MAP, TP_R_MULTIPLES, evaluate  # noqa: E402
+from services.signal_generator import HTF_MAP, TP_R_MULTIPLES, evaluate, sl_floor_atr  # noqa: E402
 from services.smc_analysis import smc_service  # noqa: E402
 from services.technical_analysis import technical_service  # noqa: E402
 
@@ -42,8 +49,8 @@ DEFAULT_SPREADS = (0.20, 0.35, 0.50, 0.80)
 TF_MINUTES = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
 RESAMPLE = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1D"}
 NEWS_SAFE = {"safe_to_trade": True, "status_text": "SAFE", "recommendation": "", "calendar_ok": True}
-# Tanlangan (eng barqaror) konfiguratsiya: TP1 da 50% + SL O'ZGARMAYDI + SL masofasi >= 2.5*ATR
-CHOSEN = {"exit": "half_hold", "sl_atr": 2.5}
+# Tanlangan (eng barqaror) konfiguratsiya: TP1 da 50% + SL O'ZGARMAYDI + SL masofasi >= 4.0*ATR (1h)
+CHOSEN = {"exit": "half_hold", "sl_atr": 4.0}  # 1h/24h uchun ishlab chiqarish floor i
 CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 
@@ -186,8 +193,7 @@ def collect_candidates(df: pd.DataFrame, setup_tf: str, session_start, session_e
     # Aks holda `--sl-atr` parametri hech narsa o'zgartirmaydi (floor allaqachon qo'llangan).
     # SL floor faqat simulyatsiya vaqtida (_transform) qo'llaniladi.
     prev_floor = getattr(settings, "MIN_SL_ATR_MULT", None)
-    if prev_floor is not None:
-        settings.MIN_SL_ATR_MULT = 0.0
+    settings.MIN_SL_ATR_MULT = 0.0
 
     for i in range(BARS, len(df) - 1):
         if not in_session(int(hours[i]), session_start, session_end):
@@ -224,8 +230,7 @@ def collect_candidates(df: pd.DataFrame, setup_tf: str, session_start, session_e
                 "htf_trend": htf_trend,
             })
 
-    if prev_floor is not None:
-        settings.MIN_SL_ATR_MULT = prev_floor
+    settings.MIN_SL_ATR_MULT = prev_floor
     return candidates
 
 
@@ -417,10 +422,11 @@ def monthly_breakdown(res: pd.DataFrame) -> None:
         print(f"  {month}: n={len(grp):>4}  win={len(w) / len(grp):>5.1%}  total={grp['r'].sum():>+7.1f}R")
 
 
-def build_fine_sweep_configs() -> list:
+def build_fine_sweep_configs(sl_grid=None) -> list:
     """SL floor ni nozik qadam bilan: barqaror platoni topish uchun."""
+    ks = tuple(sl_grid) if sl_grid else (3.0, 3.25, 3.5, 3.75, 4.0, 4.5, 5.0)
     cfgs = []
-    for k in (3.0, 3.25, 3.5, 3.75, 4.0, 4.5, 5.0):
+    for k in ks:
         for ex in ("tp1", "half_hold"):
             cfgs.append((f"{ex} + sl>={k}ATR", {"exit": ex, "sl_atr": k}))
     return cfgs
@@ -444,15 +450,20 @@ def build_sweep_configs() -> list:
 
 
 def run(setup_tf, candles, spreads, session_start, session_end, refresh, exit_models, do_sweep,
-        sweep_spread: float = 0.50, sl_atr: float = 0.0, tp_scale: float = 1.0) -> None:
+        sweep_spread: float = 0.50, sl_atr: Optional[float] = None, tp_scale: float = 1.0,
+        max_hold_hours: float = MAX_HOLD_HOURS, sl_grid=None) -> None:
     print(f"Ma'lumot yuklanmoqda: {candles} ta {setup_tf} shamcha...")
     df = fetch_history(setup_tf, candles, refresh=refresh).reset_index(drop=True)
     print(f"Davr: {df['timestamp'].iloc[0]} -> {df['timestamp'].iloc[-1]} ({len(df)} shamcha)")
 
     htf = HTF_MAP.get(setup_tf)
     session_txt = "o'chirilgan" if session_start is None else f"{session_start:02d}:00-{session_end:02d}:00 UTC"
-    max_bars = max(1, MAX_HOLD_HOURS * 60 // TF_MINUTES[setup_tf])
-    print(f"Sozlamalar: setup={setup_tf}, HTF={htf}, {BARS} shamcha, maks. ushlash={MAX_HOLD_HOURS}h, seans: {session_txt}")
+    max_bars = max(1, int(max_hold_hours * 60 // TF_MINUTES[setup_tf]))
+    # --sl-atr berilmasa: ishlab chiqarishdagi avtomatik floor (taymfreym/gorizonga qarab)
+    if sl_atr is None:
+        sl_atr = sl_floor_atr(setup_tf)
+    print(f"Sozlamalar: setup={setup_tf}, HTF={htf}, {BARS} shamcha, maks. ushlash={max_hold_hours:g}h ({max_bars} sham), seans: {session_txt}")
+    print(f"SL floor: {sl_atr:.2f} ATR (0 = o'chiq)")
 
     cands = get_candidates(df, setup_tf, candles, session_start, session_end, refresh=refresh)
     atr = np.array([c["atr"] for c in cands]) if cands else np.array([])
@@ -462,7 +473,7 @@ def run(setup_tf, candles, spreads, session_start, session_end, refresh, exit_mo
         print(f"ATR (USD) taqsimoti: min={atr.min():.2f}  25%={np.percentile(atr, 25):.2f}  "
               f"50%={np.percentile(atr, 50):.2f}  75%={np.percentile(atr, 75):.2f}  max={atr.max():.2f}")
     if do_sweep:
-        sweep(df, cands, sweep_spread, max_bars, build_fine_sweep_configs())
+        sweep(df, cands, sweep_spread, max_bars, build_fine_sweep_configs(sl_grid))
         return
 
     for spread in spreads:
@@ -491,8 +502,13 @@ if __name__ == "__main__":
     parser.add_argument("--exit", default="tp1", choices=["tp1", "live", "half_hold", "both"], help="Chiqish modeli")
     parser.add_argument("--sweep", action="store_true", help="Filtrlar/level o'zgarishlarini taqqoslash")
     parser.add_argument("--sweep-spread", type=float, default=0.50, help="Sweep uchun spread (USD)")
-    parser.add_argument("--sl-atr", type=float, default=0.0, help="SL masofasi uchun ATR floor (0 = o'chiq)")
+    parser.add_argument("--sl-atr", type=float, default=None,
+                        help="SL masofasi uchun ATR floor (0 = o'chiq, berilmasa ishlab chiqarishdagi avtomatik)")
     parser.add_argument("--tp-scale", type=float, default=1.0, help="TP ko'paytmalarini masshtablash")
+    parser.add_argument("--max-hold-hours", type=float, default=MAX_HOLD_HOURS,
+                        help="Vaqt bo'yicha majburiy chiqish (soat). Standart 24.")
+    parser.add_argument("--sl-grid", default=None,
+                        help="Sweep uchun SL/ATR qiymatlari (vergul bilan), mas: 0,1,2,3,4,5,6")
     parser.add_argument("--session-start", type=int, default=settings.SESSION_START_HOUR)
     parser.add_argument("--session-end", type=int, default=settings.SESSION_END_HOUR)
     parser.add_argument("--no-session", action="store_true", help="Seans filtrini o'chirish")
@@ -518,4 +534,6 @@ if __name__ == "__main__":
         sweep_spread=args.sweep_spread,
         sl_atr=args.sl_atr,
         tp_scale=args.tp_scale,
+        max_hold_hours=args.max_hold_hours,
+        sl_grid=([float(x) for x in args.sl_grid.split(",")] if args.sl_grid else None),
     )

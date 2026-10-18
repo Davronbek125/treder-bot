@@ -3,6 +3,7 @@ from typing import Any, Dict
 from zoneinfo import ZoneInfo
 
 from config import settings
+from services.m1_scalper import hold_text
 
 LINE = "━━━━━━━━━━━━━━━━━━━━━━"
 DISCLAIMER = (
@@ -11,8 +12,8 @@ DISCLAIMER = (
 )
 EXPECTANCY_NOTE = (
     "📉 <b>HALOL ESLATMA:</b> bu signal <b>kafolat emas</b>. ~1.4 yillik testda (5 bo'lakning "
-    "hammasida musbat) tizim kuchsiz-o'rtacha musbat: g'alaba ~49%, PF ~1.4, o'rtacha +0.11R/bitim. "
-    "Biroq bitimlarning ~70% <b>24 soatlik vaqt chegarasida</b> yopiladi (trend davomida foyda, "
+    "hammasida musbat) tizim o'rtacha musbat: g'alaba ~50%, PF ~1.55, o'rtacha +0.12R/bitim. "
+    "Biroq bitimlarning ~75% <b>24 soatlik vaqt chegarasida</b> yopiladi (trend davomida foyda, "
     "teskari davrda zarar) — ya'ni foyda <b>trend davrlariga bog'liq</b>. "
     "Real natijani /stats orqali kuzatib boring."
 )
@@ -190,9 +191,10 @@ def format_smc(smc: Dict[str, Any], price: float, timeframe: str, offset: float 
 
 
 SCALP_WARNING = (
-    "🧪 <b>EKSPERIMENTAL / DEMO SIGNAL</b>\n"
-    "<i>1 yillik backtest: ustunlik juda yupqa — foyda faqat tor spread (≤0.20$) da. "
-    "Real pulda ishlatmang, faqat kuzatish/sinov uchun.</i>"
+    "🧪 <b>M1 SKALPING SIGNALI</b>\n"
+    "<i>1 yillik backtest: spread ≤0.40$ da bo'laklarning hammasi musbat, PF ~1.1. "
+    "Spread 0.80$ ga yaqinlashsa ustunlik yo'qoladi — brokeringiz spreadini "
+    "tekshiring. Kafolat yo'q.</i>"
 )
 
 
@@ -211,7 +213,7 @@ def format_scalp_signal(sig: Dict[str, Any]) -> str:
 
     lines = [
         LINE,
-        f"⚡ <b>M1 SKALPING SIGNALI</b> | <i>TF: M1</i> (maks {p.max_bars} daqiqa)",
+        f"⚡ <b>M1 SKALPING SIGNALI</b> | <i>TF: M1</i> (ushlash maks {hold_text(p.max_bars)})",
         LINE,
         SCALP_WARNING,
         LINE,
@@ -226,11 +228,11 @@ def format_scalp_signal(sig: Dict[str, Any]) -> str:
     if action in ("BUY", "SELL"):
         r = sig["risk"]
         lines.extend([
-            "📍 <b>ZDELKA (tez, 5 daqiqagacha):</b>",
+            f"📍 <b>KIRISH ZONASI (tez, {sig['valid_minutes']} daqiqagacha):</b>",
             f"• Kirish: <code>{_usd(sig['entry_price'])}</code>",
             f"• Stop Loss: <code>{_usd(sig['stop_loss'])}</code> (masofa {_usd(r['sl_distance'])})",
             f"• Take Profit: <code>{_usd(sig['tp'])}</code> [RR {r['rr_tp1']}]",
-            f"⏱ <b>Chiqish:</b> TP/SL tegmasa, <b>{p.max_bars} daqiqadan keyin</b> bozor narxida yoping.",
+            f"⏱ <b>Chiqish:</b> TP/SL tegmasa, <b>{hold_text(p.max_bars)}dan keyin</b> bozor narxida yoping.",
             "",
             "🛡 <b>RISK VA LOT:</b>",
             f"• Depozit: <b>{r['balance']}$</b> | Risk: <b>{r['risk_percent']}%</b>",

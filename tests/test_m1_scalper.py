@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from services.m1_scalper import M1ScalperService, ScalpParams
+from services.m1_scalper import LIVE_PARAMS, M1ScalperService, ScalpParams, hold_text
 from services.market_data import MarketDataError
 
 
@@ -131,12 +131,35 @@ def _trend_m1(n=3000, up=True):
     })
 
 
+def test_live_params_is_spread_tolerant_config():
+    """1 yillik M1 backtest bo'yicha eng chidamli sozlama qulflansin.
+
+    6×ATR SL + 3R TP + 4 soat ushlash: spread 0.10-0.40$ da 5/5 bo'lak musbat.
+    Eski (SL 1×ATR / 5 daqiqa) sozlamaga tasodifan qaytib ketmasin.
+    """
+    assert LIVE_PARAMS.sl_atr_mult == 6.0
+    assert LIVE_PARAMS.tp_atr_mult == 18.0
+    assert LIVE_PARAMS.tp_atr_mult / LIVE_PARAMS.sl_atr_mult == 3.0
+    assert LIVE_PARAMS.max_bars == 240
+    assert LIVE_PARAMS.min_atr == 0.8
+    assert LIVE_PARAMS.session_start is None  # seans filtri M1 da natijani yomonlashtiradi
+
+
+def test_hold_text_formats_hours_and_minutes():
+    assert hold_text(5) == "5 daqiqa"
+    assert hold_text(45) == "45 daqiqa"
+    assert hold_text(60) == "1 soat"
+    assert hold_text(240) == "4 soat"
+    assert hold_text(150) == "2 soat 30 daqiqa"
+
+
 def test_generate_signal_structure(monkeypatch):
     monkeypatch.setattr("services.m1_scalper.fetch_history", lambda interval, total, **kw: _trend_m1())
     sig = M1ScalperService().generate_signal(balance=1000.0, risk_percent=1.0)
 
     assert sig["timeframe"] == "1m"
     assert sig["valid_minutes"] == 5
+    assert sig["max_hold_minutes"] == LIVE_PARAMS.max_bars
     assert sig["action"] in {"BUY", "SELL", "WAIT"}
     for key in ["current_price", "atr", "htf_trend", "rsi", "reasons", "params", "generated_at"]:
         assert key in sig

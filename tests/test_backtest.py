@@ -67,7 +67,7 @@ def test_backtester_tp1_does_not_move_sl_to_be(monkeypatch):
     )
     monkeypatch.setattr(
         bt, "_levels",
-        lambda action, price, atr, smc: {
+        lambda action, price, atr, smc, timeframe=None: {
             "stop_loss": price - 10.0,
             "tps": [price + 10.0, price + 20.0, price + 30.0],
         },

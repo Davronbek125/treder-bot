@@ -1,12 +1,17 @@
 """
-M1 skalping strategiyasi — qisqa muddatli, maksimal 5 daqiqa ushlanadigan tizim.
+M1 skalping strategiyasi — kirish M1 shamchada, ushlash maksimal 4 soat.
 
 Mavjud M15/H1 tizimidan (signal_generator + ensemble) ALOHIDA ishlaydi:
 - Kirish M1 shamchada (EMA pullback + momentum)
 - Yuqori TF (M5) trend filtri
 - SL/TP ATR asosida
-- Savdo maksimal `max_bars` ta M1 shamcha (default 5 = 5 daqiqa) ushlanadi,
+- Savdo maksimal `max_bars` ta M1 shamcha ushlanadi,
   so'ng bozor narxida yopiladi.
+
+Nega SL keng (6×ATR)? M1 da bitta shamchaning harakati kichik, spread esa
+QAT'IY dollar xarajati. SL tor bo'lsa spread R ning katta qismini yeb qo'yadi va
+tizim faqat juda tor spreadda ishlaydi. Keng SL (natijada ~14$) spreadni R ning
+~2-3% iga tushiradi — shu sababli tizim real broker spreadida ham ishlaydi.
 
 Indikatorlar vektorlashtirilgan (butun seriya bo'yicha bir marta hisoblanadi),
 shuning uchun yuz minglab shamchani ham tez qayta ishlaydi va backtestda
@@ -24,6 +29,14 @@ from config import settings
 from services.market_data import MarketDataError, fetch_history
 from services.risk_calculator import risk_service
 from services.technical_analysis import technical_service
+
+
+def hold_text(minutes: int) -> str:
+    """Daqiqani o'qishli matnga aylantiradi: 240 -> '4 soat', 45 -> '45 daqiqa'."""
+    if minutes >= 60:
+        hours, mins = divmod(minutes, 60)
+        return f"{hours} soat" if mins == 0 else f"{hours} soat {mins} daqiqa"
+    return f"{minutes} daqiqa"
 
 
 @dataclass
@@ -270,8 +283,10 @@ class M1ScalperService:
         """
         Jonli M1 skalping signalini shakllantiradi (oxirgi yopilgan M1 shamcha bo'yicha).
 
-        DIQQAT: eksperimental. Backtest shuni ko'rsatadiki foyda faqat juda tor
-        spread'da (<=0.20$) bo'ladi. Real pulda xavfli.
+        HALOL ESLATMA: 1 yillik backtest (525 600 shamcha, Binance PAXGUSDT) bo'yicha
+        spread 0.10-0.40$ da 5 bo'lakning HAMMASI musbat (PF ~1.08-1.13, +0.05..+0.08R).
+        Spread 0.80$ da ustunlik ~0 ga tushadi. Kafolat yo'q — signaldan oldin o'z
+        brokeringizning spreadini tekshiring.
         """
         p = params or LIVE_PARAMS
         try:
@@ -307,7 +322,8 @@ class M1ScalperService:
             "rsi": round(float(last["rsi"]), 1),
             "offset": offset,
             "generated_at": datetime.now(ZoneInfo(settings.TIMEZONE)),
-            "valid_minutes": p.max_bars,
+            "valid_minutes": ENTRY_VALID_MINUTES,
+            "max_hold_minutes": p.max_bars,
             "reasons": reasons,
             "params": p,
             "entry_price": None,
@@ -328,14 +344,24 @@ class M1ScalperService:
                 "risk": risk_service.calculate_lot_size(balance, risk_percent, entry, sl, tp, tp, tp),
             })
             sig["reasons"].append(
-                f"Kirish: M1 pullback + momentum ({p.sl_atr_mult}ATR SL / {p.tp_atr_mult}ATR TP, "
-                f"maks {p.max_bars} daqiqa)"
+                f"Kirish: M1 pullback + momentum (SL {p.sl_atr_mult:.0f}×ATR / "
+                f"TP {p.tp_atr_mult / p.sl_atr_mult:.0f}R, ushlash maks {hold_text(p.max_bars)})"
             )
         return sig
 
 
-# Jonli /scalp uchun standart sozlamalar (1 yillik backtest: eng chidamlisi)
+# Jonli /scalp uchun standart sozlamalar.
+# 1 yillik M1 backtest (525 600 shamcha) bo'yicha ENG CHIDAMLISI:
+#   spread 0.10-0.40$ da 5/5 bo'lak musbat (PF 1.08-1.13, OOS PF 1.08-1.14).
+# Eski sozlama (SL 1×ATR / TP 2.5×ATR / 5 daqiqa) faqat ≤0.15$ spreadda ishlardi.
 LIVE_HISTORY_BARS = 3000
-LIVE_PARAMS = ScalpParams(tp_atr_mult=2.5, min_atr=1.2, max_bars=5, htf_rule="5min")
+ENTRY_VALID_MINUTES = 5  # signal shu vaqt ichida kirish uchun amal qiladi
+LIVE_PARAMS = ScalpParams(
+    sl_atr_mult=6.0,          # keng SL: spreadni R ning kichik qismiga tushiradi
+    tp_atr_mult=18.0,         # TP = 3R
+    min_atr=0.8,              # juda "o'lik" bozorni o'tkazib yuborish
+    max_bars=240,             # 4 soatgacha ushlash
+    htf_rule="5min",
+)
 
 m1_scalper_service = M1ScalperService()

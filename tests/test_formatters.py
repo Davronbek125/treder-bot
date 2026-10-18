@@ -69,7 +69,7 @@ def _scalp_sig(action="BUY"):
 def test_format_scalp_signal_has_warning_and_levels():
     text = format_scalp_signal(_scalp_sig("BUY"))
     assert "M1 SKALPING" in text
-    assert "EKSPERIMENTAL" in text
+    assert "spread" in text
     assert "Stop Loss" in text and "Take Profit" in text
     assert "moliyaviy maslahat emas" in text
 

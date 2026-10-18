@@ -152,7 +152,7 @@ class BacktesterService:
                         action = decision["action"]
                         if action in ("BUY", "SELL"):
                             atr = max(tech["atr"], 1.0)
-                            lv = _levels(action, curr_close, atr, smc)
+                            lv = _levels(action, curr_close, atr, smc, timeframe)
                             tps = lv.get("tps", [curr_close, curr_close])
                             # Spread kirish narxini yomonlashtiradi
                             entry = curr_close + spread if action == "BUY" else curr_close - spread

@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd  # noqa: E402
+import numpy as np  # noqa: E402
 
 from services.m1_scalper import ScalpParams, m1_scalper_service  # noqa: E402
 from services.market_data import fetch_history  # noqa: E402
@@ -132,30 +133,105 @@ def run(candles: int, params: ScalpParams, balance: float, risk: float, spread: 
         print_split(m1_scalper_service.simulate(prepared, params, spread=spread), balance, risk, spread)
 
 
-def sweep(candles: int, base: ScalpParams, balance: float, risk: float, refresh: bool) -> None:
+def _pf(r: pd.Series) -> float:
+    gw = float(r[r > 0].sum())
+    gl = float(abs(r[r <= 0].sum()))
+    return (gw / gl) if gl else (99.0 if gw else 0.0)
+
+
+def _mask(df: pd.DataFrame, min_atr: float = 0.0, session=None) -> pd.DataFrame:
+    """Signal ustuniga min_atr/session filtrlarini qo'llaydi (qayta prepare qilmasdan)."""
+    a = df["action"].to_numpy().copy()
+    if min_atr and min_atr > 0:
+        a[df["atr"].to_numpy(dtype=float) < min_atr] = "WAIT"
+    if session:
+        h = df["timestamp"].dt.hour.to_numpy()
+        a[~((h >= session[0]) & (h <= session[1]))] = "WAIT"
+    out = df.copy()
+    out["action"] = a
+    return out
+
+
+def _market(df: pd.DataFrame) -> dict:
+    """ATR taqsimoti - M1 da harakat spreadga nisbatan yetarlimi ko'rish uchun."""
+    atr = df["atr"].to_numpy(dtype=float)
+    atr = atr[pd.notna(atr) & (atr > 0)]
+    if not atr.size:
+        return {}
+    return {
+        "min": float(atr.min()), "25": float(np.percentile(atr, 25)),
+        "50": float(np.percentile(atr, 50)), "75": float(np.percentile(atr, 75)),
+        "max": float(atr.max()), "mean": float(atr.mean()),
+    }
+
+
+def sweep(candles: int, base: ScalpParams, balance: float, risk: float, refresh: bool,
+          spreads=None, bars_list=None, sl_list=None, tp_r_list=None,
+          min_atr_list=None) -> None:
+    """
+    SL/TP/ushlash vaqtini birgalikda qidiradi va HAR BIR variant uchun
+    IS/OOS + 5 bo'lak barqarorligini ko'rsatadi.
+
+    MUHIM: M1 da SL "shovqin zonasidan" tashqarida bo'lishi kerak.
+    Nazariy: floor ~ 0.8 * sqrt(max_bars) * ATR (masalan 5 daqiqa -> ~1.8 ATR).
+    """
     df = load_m1(candles, refresh)
     print(f"Sweep davri: {df['timestamp'].iloc[0]} -> {df['timestamp'].iloc[-1]}\n")
 
-    print(f"{'SL/TP/maxBars':<18} {'spread':>7} {'n':>6} {'win':>6} {'avgR':>8} {'totalR':>9} {'PF':>6}")
-    best = None
-    for tp_mult in (1.0, 1.5, 2.0, 2.5, 3.0):
-        for bars in (5, 10, 15):
-            params = ScalpParams(
-                sl_atr_mult=base.sl_atr_mult, tp_atr_mult=tp_mult, max_bars=bars,
-                min_atr=base.min_atr, session_start=base.session_start, session_end=base.session_end,
-            )
-            prepared = m1_scalper_service.prepare(df, params)
-            for sp in (0.10, 0.20, 0.30):
-                res = m1_scalper_service.simulate(prepared, params, spread=sp)
-                s = stats(res, balance, risk)
-                if s.get("n", 0) == 0:
-                    continue
-                print(f"SL{params.sl_atr_mult} TP{tp_mult} b{bars:<4} {sp:>7.2f} {s['n']:>6} {s['win_rate']:>5.1%} "
-                      f"{s['avg_r']:>+8.3f} {s['total_r']:>+9.1f} {s['pf']:>6.2f}")
-                if best is None or s["total_r"] > best[0]["total_r"]:
-                    best = (s, f"SL{params.sl_atr_mult} TP{tp_mult} b{bars} spread={sp}")
-    if best:
-        print(f"\nEng yaxshi (total R bo'yicha): {best[1]} -> {best[0]['total_r']:+.1f}R, PF={best[0]['pf']:.2f}")
+    # prepare BIR MARTA (sl/tp/max_bars signal ustunlariga ta'sir qilmaydi) - juda tez.
+    prepared = m1_scalper_service.prepare(
+        df, ScalpParams(min_atr=0.0, session_start=None, session_end=None, htf_rule=base.htf_rule)
+    )
+    mkt = _market(prepared)
+    if mkt:
+        print(f"ATR (M1, USD): 25%={mkt['25']:.2f} 50%={mkt['50']:.2f} 75%={mkt['75']:.2f} "
+              f"mean={mkt['mean']:.2f} max={mkt['max']:.2f}")
+        print("(Spread ATR'ning qancha qismi - shu M1 ning asosiy muammosi)\n")
+
+    spreads = spreads or (0.20, 0.30)
+    bars_list = bars_list or (5, 15, 30, 60)
+    sl_list = sl_list or (1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+    tp_r_list = tp_r_list or (1.0, 2.0)
+    min_atr_list = min_atr_list or (base.min_atr,)
+    session = (base.session_start, base.session_end) if base.session_start is not None else None
+    print(f"{'ATR>':>5}{'bars':>6}{'SL':>5}{'TP_R':>6}{'spread':>8}{'n':>7}{'win%':>7}{'avgR':>8}"
+          f"{'totalR':>9}{'PF':>6}{'IS':>6}{'OOS':>6}{'minF':>6}{'f>1':>5}{'TIME%':>7}{'SL$':>7}")
+    print("-" * 108)
+    for ma in min_atr_list:
+        masked = _mask(prepared, ma, session)
+        for bars in bars_list:
+            for sl_mult in sl_list:
+                for tp_r in tp_r_list:
+                    params = ScalpParams(
+                        sl_atr_mult=sl_mult, tp_atr_mult=sl_mult * tp_r, max_bars=bars,
+                        min_atr=ma, session_start=base.session_start,
+                        session_end=base.session_end, htf_rule=base.htf_rule,
+                    )
+                    for sp in spreads:
+                        res = m1_scalper_service.simulate(masked, params, spread=sp)
+                        if res.empty:
+                            continue
+                        r = res["r"]
+                        split = int(len(res) * 0.7)
+                        size = max(1, len(res) // 5)
+                        fold_pfs = []
+                        for k in range(5):
+                            lo = k * size
+                            hi = (k + 1) * size if k < 4 else len(res)
+                            seg = res.iloc[lo:hi]
+                            if not seg.empty:
+                                fold_pfs.append(_pf(seg["r"]))
+                        n_good = sum(1 for p in fold_pfs if p > 1.0)
+                        sl_usd = float((res["entry"] - res["sl"]).abs().mean())
+                        print(
+                            f"{ma:>5.2f}{bars:>6}{sl_mult:>5.1f}{tp_r:>6.1f}{sp:>8.2f}{len(res):>7}"
+                            f"{(r > 0).mean() * 100:>6.1f}%{r.mean():>+8.3f}{r.sum():>+9.1f}"
+                            f"{_pf(r):>6.2f}{_pf(res.iloc[:split]['r']):>6.2f}{_pf(res.iloc[split:]['r']):>6.2f}"
+                            f"{min(fold_pfs):>6.2f}{n_good:>5}"
+                            f"{(res['reason'] == 'TIME').mean() * 100:>6.0f}%{sl_usd:>7.1f}"
+                        )
+    print("\nEslatma: ustunlik = avgR musbat VA OOS hamda minF (eng yomon bo'lak) > 1 bo'lishi.")
+    print("M1 da spread katta qism bo'lgani uchun SL (dollarda) keng bo'lishi shart.")
 
 
 if __name__ == "__main__":
@@ -171,6 +247,12 @@ if __name__ == "__main__":
     parser.add_argument("--risk", type=float, default=1.0)
     parser.add_argument("--spread", type=float, default=None, help="Bitta spread qiymati (default: bir nechta)")
     parser.add_argument("--sweep", action="store_true", help="Parametr qidiruvi")
+    parser.add_argument("--sweep-spreads", default="0.20,0.30",
+                        help="Sweep uchun spreadlar (vergul bilan)")
+    parser.add_argument("--sweep-bars", default=None, help="Sweep uchun ushlash (shamchada)")
+    parser.add_argument("--sweep-sl", default=None, help="Sweep uchun SL (ATR ko'paytmasi)")
+    parser.add_argument("--sweep-tp-r", default=None, help="Sweep uchun TP (R ko'paytmasi)")
+    parser.add_argument("--sweep-min-atr", default=None, help="Sweep uchun min ATR (USD)")
     parser.add_argument("--refresh", action="store_true", help="Keshni yangilash")
     args = parser.parse_args()
 
@@ -179,6 +261,14 @@ if __name__ == "__main__":
         session_start=args.session_start, session_end=args.session_end,
     )
     if args.sweep:
-        sweep(args.candles, params, args.balance, args.risk, args.refresh)
+        _floats = lambda s: ([float(x) for x in s.split(",")] if s else None)
+        sweep(
+            args.candles, params, args.balance, args.risk, args.refresh,
+            spreads=tuple(float(x) for x in args.sweep_spreads.split(",")),
+            bars_list=([int(x) for x in args.sweep_bars.split(",")] if args.sweep_bars else None),
+            sl_list=_floats(args.sweep_sl),
+            tp_r_list=_floats(args.sweep_tp_r),
+            min_atr_list=_floats(args.sweep_min_atr),
+        )
     else:
         run(args.candles, params, args.balance, args.risk, args.spread, args.refresh)

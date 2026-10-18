@@ -113,7 +113,7 @@ async def cmd_help(message: Message):
         "/news - yangiliklar\n/calc - lot kalkulyatori\n"
         "/stats - haqiqiy natijalar (Win Rate, Profit Factor)\n"
         "/backtest - tezkor strategiya testi\n"
-        "/scalp - ⚡ M1 skalping <i>(eksperimental/demo)</i>\n"
+        "/scalp - ⚡ M1 skalping (4 soatgacha ushlash, seanssiz)\n"
         "/price &lt;narx&gt; - MT5 narxiga moslash (<code>/price reset</code> - bekor qilish)\n\n"
         "⏸ <b>Seans:</b> signallar faqat <b>London/Nyu-York</b> (08:00–22:00 UTC) da beriladi "
         "(kechasi likvidlik past, spread keng).\n\n"
@@ -121,8 +121,10 @@ async def cmd_help(message: Message):
         "1. Signal keldi - kirish, SL, TP va lotni ko'ring.\n"
         "2. MT5 da XAUUSD > yangi order, lotni yozing.\n"
         "3. SL va TP ni kiriting, BUY/SELL bosing.\n"
-        "4. Signal amal qilish vaqti tugagan bo'lsa - yangisini oling.\n"
-        "5. «✅ Bitim ochildi (Kuzatish)» tugmasini bosing - bot natijani o'zi kuzatadi (/stats)."
+        "4. TP1 ga yetsa - pozitsiyaning <b>yarmini yoping</b>, SL ni <b>O'ZGARTIRMANG</b> "
+        "(qolgan yarmi TP2/TP3 ni nishonga oladi).\n"
+        "5. Bitim <b>ko'pi bilan 24 soat</b> ushlanadi - shu vaqt ichida yopilmagan bo'lsa yopiladi.\n"
+        "6. «✅ Bitim ochildi (Kuzatish)» tugmasini bosing - bot natijani o'zi kuzatadi (/stats)."
     )
     await message.answer(text)
 

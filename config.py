@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -18,7 +20,7 @@ class Settings(BaseSettings):
 
     # Tahlil vaqt intervallari (Timeframes)
     TIMEFRAMES: list[str] = ["5m", "15m", "1h", "4h", "1d"]
-    DEFAULT_TIMEFRAME: str = "1h"  # backtestda 15m zarar ko'rsatdi (scripts/backtest.py)
+    DEFAULT_TIMEFRAME: str = "1h"  # 1h eng barqaror (15m: PF 1.24 lekin 1 bo'lak zararli; scripts/backtest.py)
 
     # Signal kuchi chegarasi (0-100, indikatorlar mosligi balli).
     # DIQQAT: bu qiymat endi haqiqatda ishlaydi (services/ensemble.py).
@@ -35,12 +37,20 @@ class Settings(BaseSettings):
     SESSION_END_HOUR: int = 22
 
     # SL (Stop Loss) masofasi uchun MINIMAL ATR ko'paytmasi.
-    # ASOS: 24 soatlik ushlash gorizontida narxning tabiiy "shovqin zonasi"
-    # taxminan 0.8 * ATR * sqrt(24) ~ 3.9 * ATR. Bu zonadan TORROQ stop shovqin
-    # bilan urilib ketadi. Backtest (scripts/backtest.py --sweep):
-    #   ~1.5 ATR stop -> PF 1.05 ; 2.5 ATR -> 1.25 ; 3.5 ATR -> 1.44
-    # 3.5-4.5 ATR oralig'i barqaror plateau (3 spread x 5 bo'lakda ham PF > 1).
-    MIN_SL_ATR_MULT: float = 3.5
+    # None -> TAYMFREYM/GORIZONTGA QARAB AVTOMATIK (services.signal_generator.sl_floor_atr).
+    # Son berilsa -> qat'iy qiymat (scripts/backtest.py shundan foydalanadi).
+    #
+    # NEGA AVTOMATIK? Ushlash gorizontidagi tabiiy "shovqin zonasi" ~ K*ATR*sqrt(N),
+    # bu yerda N = ushlash shamchalari soni. Shu formula turli taymfreymlarda
+    # BIR XIL dollar SL beradi: 15m (96 sham) ~ 8 ATR, 1h (24) ~ 4 ATR, 4h (6) ~ 2 ATR.
+    MIN_SL_ATR_MULT: Optional[float] = None
+
+    # Shovqin zonasi koeffitsienti: K ~ sqrt(2/pi) ~ 0.8.
+    # 1h/24h -> 4.0 ATR, 15m/24h -> 8.0 ATR (backtest bo'yicha ikkalasi ham tasdiqlangan).
+    SL_FLOOR_K: float = 0.82
+    # Eng katta ruxsat etilgan floor (validatsiya qilingan eng keng qiymat).
+    # 5m kabi juda kichik TF larda formulani cheksiz cho'zmaslik uchun.
+    SL_FLOOR_MAX_ATR: float = 8.0
 
     # Ochiq bitim necha soatdan keyin eskigan (yopilmagan) hisoblanadi.
     # DIQQAT: backtestdagi MAX_HOLD_HOURS bilan bir xil bo'lishi kerak (scripts/backtest.py).

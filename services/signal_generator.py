@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -18,18 +19,55 @@ log = logging.getLogger(__name__)
 HTF_MAP: Dict[str, Optional[str]] = {"5m": "1h", "15m": "1h", "1h": "4h", "4h": "1d", "1d": None}
 # Signal necha daqiqa davomida dolzarb hisoblanadi
 VALID_MINUTES: Dict[str, int] = {"5m": 10, "15m": 30, "1h": 90, "4h": 240, "1d": 720}
+# Bir shamcha necha daqiqa (SL floor va ushlash gorizontini hisoblash uchun)
+TF_MINUTES: Dict[str, int] = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
 
 SL_ATR_MULT = 1.5
-# Minimal SL masofasi (ATR ko'paytmasi). Shovqin zonasidan tashqarida bo'lishi uchun
-# (config.MIN_SL_ATR_MULT, standart 3.5). Backtest: --sweep ga qarang.
-MIN_SL_ATR_MULT = 3.5
-# TP lar Risk (SL masofasi) ning ko'paytmalari sifatida: 1.5R, 2.5R, 4R
 TP_R_MULTIPLES: Tuple[float, float, float] = (1.5, 2.5, 4.0)
+
+
+def sl_floor_atr(timeframe: Optional[str] = None) -> float:
+    """
+    SL uchun minimal masofa (ATR ko'paytmasi) — ushlash davrining "shovqin zonasi".
+
+    Nazariya: N ta shamcha ushlansa, narxning eng katta salbiy og'ishi
+    taxminan E[max] ~ sqrt(2/pi) * sigma * sqrt(N), ya'ni K * ATR * sqrt(N).
+    Shuning uchun floor'ni ushlash gorizontiga qarab olamiz va bu TURLI
+    taymfreymlarda BIR XIL dollar SL beradi (oqibatda bir xil risk).
+
+    Backtest (scripts/backtest.py --sweep, 1 yil, 24h ushlash):
+      - 1h : optimal floor 4.0 ATR (OOS PF 1.26, eng yomon bo'lak 1.23)
+      - 15m: cho'qqi 3.75 ATR, lekin OOS/barqarorlik 6-8 ATR da eng yaxshi (OOS 1.22-1.29)
+      - 4h : 2.0 ATR (nazariy; to'g'ridan-to'g'ri test qilinmagan)
+
+    DIQQAT: floor >= ~4 ATR bo'lsa, 1h da SMC tuzilmasi (maks 3.8 ATR) endi
+    hech qachon tanlanmaydi — SL sof ATR stop bo'ladi. Backtest aynan shu
+    xatti-harakatni o'lchagan, ya'ni bu kutilgan holat.
+
+    MUHIM: formula `_transform` dagi bilan bir xil bo'lishi kerak
+    (scripts/backtest.py: `sl_dist = max(sl_dist, sl_atr * atr)`).
+    """
+    override = getattr(settings, "MIN_SL_ATR_MULT", None)
+    if override is not None:
+        return float(override)
+
+    tf = timeframe or settings.DEFAULT_TIMEFRAME
+    bar_min = TF_MINUTES.get(tf, 60)
+    hold_hours = getattr(settings, "MAX_TRADE_HOURS", 24.0)
+    n_bars = max(1.0, hold_hours * 60.0 / bar_min)
+    floor = getattr(settings, "SL_FLOOR_K", 0.82) * math.sqrt(n_bars)
+    return min(floor, getattr(settings, "SL_FLOOR_MAX_ATR", 8.0))
 
 
 from services.ensemble import ensemble_service
 
-def _levels(action: str, price: float, atr: float, smc: Dict[str, Any]) -> Dict[str, Any]:
+def _levels(
+    action: str,
+    price: float,
+    atr: float,
+    smc: Dict[str, Any],
+    timeframe: Optional[str] = None,
+) -> Dict[str, Any]:
     """SL (SMC zonalari va ATR asosida) va R-ko'paytmali TP larni hisoblaydi."""
     sign = 1 if action == "BUY" else -1
     sl_dist = atr * SL_ATR_MULT
@@ -58,8 +96,8 @@ def _levels(action: str, price: float, atr: float, smc: Dict[str, Any]) -> Dict[
             sl_dist = dist + 0.3 * atr  # Likvidlik (Stop hunt) dan himoya
             break
 
-    # Shovqin zonasidan himoya: SL kamida MIN_SL_ATR_MULT * ATR masofada bo'lsin
-    min_sl = atr * getattr(settings, "MIN_SL_ATR_MULT", MIN_SL_ATR_MULT)
+    # Shovqin zonasidan himoya: SL kamida `sl_floor_atr(tf) * ATR` masofada bo'lsin
+    min_sl = atr * sl_floor_atr(timeframe)
     if sl_dist < min_sl:
         sl_dist = min_sl
 
@@ -123,7 +161,7 @@ def evaluate(
     }
 
     if action in ("BUY", "SELL"):
-        lv = _levels(action, price, atr, smc)
+        lv = _levels(action, price, atr, smc, timeframe)
         entry = round(price + offset, 2)
         sl = round(lv["stop_loss"] + offset, 2)
         tps = [round(t + offset, 2) for t in lv["tps"]]

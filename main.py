@@ -29,7 +29,7 @@ COMMANDS = [
     BotCommand(command="smc", description="🧠 SMC zonalari"),
     BotCommand(command="news", description="📰 Yangiliklar"),
     BotCommand(command="calc", description="🛡 Lot kalkulyatori"),
-    BotCommand(command="scalp", description="⚡ M1 skalping (eksperimental)"),
+    BotCommand(command="scalp", description="⚡ M1 skalping (4 soatgacha ushlash)"),
     BotCommand(command="stats", description="📊 Statistika"),
     BotCommand(command="backtest", description="🧪 Strategiya backtesti"),
     BotCommand(command="price", description="🔧 MT5 narxiga moslash"),
