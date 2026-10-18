@@ -149,13 +149,18 @@ class SignalJournal:
             except Exception:
                 log.exception(f"Signalni yopishda xatolik yuz berdi: {signal_id}")
 
-    def mark_trade_tp1_hit(self, signal_id: int, break_even_sl: float, partial_pnl: float):
+    def mark_trade_tp1_hit(self, signal_id: int, stop_loss: float, partial_pnl: float):
+        """TP1 urilganda: qisman foyda yoziladi. `stop_loss` - qolgan qism uchun amal qiladigan SL.
+
+        DIQQAT: jonli mantiqda SL BE (kirish) ga SURILMAYDI - asl SL saqlanadi.
+        Backtest (`scripts/backtest.py`, `half_hold`) BE ga surish foydani kamaytirishini ko'rsatdi.
+        """
         with self._lock:
             try:
                 with self._connection() as conn:
                     conn.execute(
                         "UPDATE signals SET result = 'TP1_HIT', stop_loss = ?, pnl = ? WHERE id = ?", 
-                        (break_even_sl, partial_pnl, signal_id)
+                        (stop_loss, partial_pnl, signal_id)
                     )
                     conn.commit()
             except Exception:

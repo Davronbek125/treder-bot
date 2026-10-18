@@ -20,6 +20,9 @@ HTF_MAP: Dict[str, Optional[str]] = {"5m": "1h", "15m": "1h", "1h": "4h", "4h": 
 VALID_MINUTES: Dict[str, int] = {"5m": 10, "15m": 30, "1h": 90, "4h": 240, "1d": 720}
 
 SL_ATR_MULT = 1.5
+# Minimal SL masofasi (ATR ko'paytmasi). Shovqin zonasidan tashqarida bo'lishi uchun
+# (config.MIN_SL_ATR_MULT, standart 3.5). Backtest: --sweep ga qarang.
+MIN_SL_ATR_MULT = 3.5
 # TP lar Risk (SL masofasi) ning ko'paytmalari sifatida: 1.5R, 2.5R, 4R
 TP_R_MULTIPLES: Tuple[float, float, float] = (1.5, 2.5, 4.0)
 
@@ -54,6 +57,11 @@ def _levels(action: str, price: float, atr: float, smc: Dict[str, Any]) -> Dict[
         if 0.8 * atr <= dist <= 3.5 * atr:
             sl_dist = dist + 0.3 * atr  # Likvidlik (Stop hunt) dan himoya
             break
+
+    # Shovqin zonasidan himoya: SL kamida MIN_SL_ATR_MULT * ATR masofada bo'lsin
+    min_sl = atr * getattr(settings, "MIN_SL_ATR_MULT", MIN_SL_ATR_MULT)
+    if sl_dist < min_sl:
+        sl_dist = min_sl
 
     return {
         "stop_loss": round(price - sign * sl_dist, 2),

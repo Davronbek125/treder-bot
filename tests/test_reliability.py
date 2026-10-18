@@ -114,7 +114,7 @@ def test_simulate_buy_tp_after_spread(bt):
     # entry=100, spread=0.5 -> 100.5; SL=95 -> risk=5.5; TP1=110
     df = _candles([100, 106, 111, 100, 100], [100, 99, 100, 100, 100], [100, 105, 110, 100, 100])
     r, reason, idx = bt.simulate(df, 0, "BUY", 95.0, 110.0, 0.5, 10)
-    assert reason == "TP"
+    assert reason == "TP1"
     assert idx == 2
     assert r == pytest.approx((110.0 - 100.5) / 5.5, rel=1e-9)
 
@@ -150,3 +150,41 @@ def test_simulate_spread_skips_overlapping_signals(bt):
     res = bt.simulate_spread(df, cands, 0.0, 10)
     # Birinchi bitim 2-shamchada yopiladi; idx=1 undan keyin joylashgani uchun tashlab yuboriladi
     assert len(res) == 1
+
+
+# --- SL/TP yo'nalishlari (BUY: SL past, TP tepa; SELL: aksincha) ---
+
+def test_sell_sl_and_tp_directions(bt):
+    # SELL: SL tepada (105), TP pastda (90)
+    sl_df = _candles([100, 106, 100], [100, 99, 100], [100, 105, 100])
+    r, reason, _ = bt.simulate(sl_df, 0, "SELL", 105.0, 90.0, 0.0, 10)
+    assert reason == "SL" and r == -1.0
+
+    tp_df = _candles([100, 100, 100], [100, 89, 89], [100, 95, 90])
+    r, reason, _ = bt.simulate(tp_df, 0, "SELL", 105.0, 90.0, 0.0, 10)
+    assert reason == "TP1" and r == pytest.approx(2.0)
+
+
+# --- Jonli (live) exit modeli: TP1 da 50% + SL BE ga ---
+
+def test_live_exit_tp1_then_breakeven(bt):
+    # TP1 (110) tegadi, keyin narx kirishga (100) qaytadi -> 0.5*2.0 = 1.0R
+    df = _candles([100, 111, 100], [100, 101, 99], [100, 110, 99])
+    r, reason, _ = bt.simulate(df, 0, "BUY", 95.0, 110.0, 0.0, 10, None, None, "live")
+    assert reason == "BE"
+    assert r == pytest.approx(1.0)
+
+
+def test_live_exit_reaches_tp2(bt):
+    # TP1 dan keyin TP2 (2.5R) tegadi -> 0.5*2.0 + 0.5*r2
+    df = _candles([100, 111, 117], [100, 105, 106], [100, 110, 116])
+    r, reason, _ = bt.simulate(df, 0, "BUY", 95.0, 110.0, 0.0, 10, None, None, "live")
+    assert reason == "TP2"
+    assert r > 1.5
+
+
+def test_live_exit_full_loss_before_tp1(bt):
+    # TP1 ga yetmasdan SL -> -1.0R
+    df = _candles([100, 100, 100], [100, 96, 94], [100, 96, 94])
+    r, reason, _ = bt.simulate(df, 0, "BUY", 95.0, 110.0, 0.0, 10, None, None, "live")
+    assert reason == "SL" and r == -1.0

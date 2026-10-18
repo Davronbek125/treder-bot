@@ -10,9 +10,10 @@ DISCLAIMER = (
     "Har doim Stop Loss ishlating va risk-menejmentga rioya qiling.</i>"
 )
 EXPECTANCY_NOTE = (
-    "📉 <b>HALOL ESLATMA:</b> bu signal <b>kafolat emas</b>. ~1.4 yillik testda tizim "
-    "kuchsiz musbat (g'alaba ~45%, PF ~1.06–1.11, o'rtacha +0.03R/bitim). Ustunlik "
-    "<b>juda yupqa</b> va foyda broker <b>spreadiga</b> bog'liq — spread kengaysa yo'qoladi. "
+    "📉 <b>HALOL ESLATMA:</b> bu signal <b>kafolat emas</b>. ~1.4 yillik testda (5 bo'lakning "
+    "hammasida musbat) tizim kuchsiz-o'rtacha musbat: g'alaba ~49%, PF ~1.4, o'rtacha +0.11R/bitim. "
+    "Biroq bitimlarning ~70% <b>24 soatlik vaqt chegarasida</b> yopiladi (trend davomida foyda, "
+    "teskari davrda zarar) — ya'ni foyda <b>trend davrlariga bog'liq</b>. "
     "Real natijani /stats orqali kuzatib boring."
 )
 
@@ -89,7 +90,7 @@ def format_signal(sig: Dict[str, Any]) -> str:
         if r["min_lot_exceeds_risk"]:
             lines.append(f"⚠️ <i>Minimal lot (0.01) belgilangan {r['risk_percent']}% riskdan ko'p zarar "
                          "keltiradi. Depozit kichik - ehtiyot bo'ling yoki signalni o'tkazib yuboring.</i>")
-        lines.append("💡 <i>TP1 ga yetganda yarmini yoping va SL ni kirish narxiga suring.</i>")
+        lines.append("💡 <i>TP1 ga yetganda yarmini yoping, SL ni O'ZGARTIRMANG (BE ga surmang) — qolgani TP2/TP3 ni nishonga oladi.</i>")
         lines.append("")
         
         if "votes" in sig:

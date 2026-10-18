@@ -82,7 +82,11 @@ def test_process_open_trades_sell_hit_tp(temp_journal):
     notifs = _process_open_trades(now, current_price=2640.0)
     assert len(notifs) == 1
     assert "TP1" in notifs[0][1]
-    assert "Breakeven" in notifs[0][1]
+    # SL BE ga surilmaydi (asl SL saqlanadi)
+    assert "o'zgartirilmadi" in notifs[0][1]
+    with temp_journal._connection() as conn:
+        sl_now = conn.execute("SELECT stop_loss FROM signals WHERE id=?", (sig_id,)).fetchone()[0]
+    assert sl_now == pytest.approx(2655.0)
     
     stats = temp_journal.get_stats()
     # Hali yopilmagan
@@ -100,7 +104,7 @@ def test_process_open_trades_sell_hit_tp(temp_journal):
 def test_process_open_trades_expired(temp_journal):
     now = datetime.now()
     sig = {
-        "generated_at": now - timedelta(hours=13),
+        "generated_at": now - timedelta(hours=25),
         "action": "BUY",
         "timeframe": "M15",
         "entry_price": 2650.0,
@@ -111,7 +115,7 @@ def test_process_open_trades_expired(temp_journal):
     sig_id = temp_journal.log_signal(sig, user_id=777)
     temp_journal.mark_trade_open(sig_id)
     
-    # Narx oraliqda (2652.0), lekin 13 soat o'tgan
+    # Narx oraliqda (2652.0), lekin 25 soat o'tgan (config.MAX_TRADE_HOURS = 24)
     notifs = _process_open_trades(now, current_price=2652.0)
     assert len(notifs) == 1
     assert "eski" in notifs[0][1].lower() or "kuzatuvdan olindi" in notifs[0][1].lower()
@@ -156,25 +160,26 @@ def _open_buy(journal, user_id, hours_ago=0.0):
     return sid
 
 
-def test_breakeven_after_tp1_counts_as_win_with_partial_profit(temp_journal):
+def test_stop_after_tp1_keeps_partial_profit(temp_journal):
+    """TP1 dan keyin asl SL urilsa - qisman foyda saqlanadi (BE ga surilmaydi)."""
     now = datetime.now()
-    _open_buy(temp_journal, 321)
+    _open_buy(temp_journal, 321)  # sl=2645, tp1=2660
     notifs = _process_open_trades(now, current_price=2661.0)  # TP1
     assert "++" not in notifs[0][1]
-    # Narx kirish narxiga qaytdi -> breakeven
-    notifs = _process_open_trades(now, current_price=2650.0)
+    # Narx ASL SL ga (2645) qaytdi -> qisman foyda qulflanadi
+    notifs = _process_open_trades(now, current_price=2645.0)
     assert len(notifs) == 1
-    assert "Breakeven" in notifs[0][1]
+    assert "TP1 dan keyin SL" in notifs[0][1]
     stats = temp_journal.get_stats()
+    # 0.5 * (2660-2650) * 100 * 0.1 = +50$ ; 0.5 * (2645-2650) * 100 * 0.1 = -25$ -> +25$
     assert stats["losses"] == 0
     assert stats["wins"] == 1
-    # 0.5 * 10$ * 100 * 0.1 lot = 50$
-    assert stats["total_pnl"] == pytest.approx(50.0)
+    assert stats["total_pnl"] == pytest.approx(25.0)
 
 
 def test_expired_after_tp1_keeps_partial_profit(temp_journal):
-    sid = _open_buy(temp_journal, 322, hours_ago=13)
-    temp_journal.mark_trade_tp1_hit(sid, break_even_sl=2650.0, partial_pnl=50.0)
+    sid = _open_buy(temp_journal, 322, hours_ago=25)
+    temp_journal.mark_trade_tp1_hit(sid, stop_loss=2645.0, partial_pnl=50.0)
     _process_open_trades(datetime.now(), current_price=2655.0)
     with temp_journal._connection() as conn:
         result, pnl = conn.execute("SELECT result, pnl FROM signals WHERE id=?", (sid,)).fetchone()

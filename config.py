@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     SESSION_START_HOUR: int = 8
     SESSION_END_HOUR: int = 22
 
+    # SL (Stop Loss) masofasi uchun MINIMAL ATR ko'paytmasi.
+    # ASOS: 24 soatlik ushlash gorizontida narxning tabiiy "shovqin zonasi"
+    # taxminan 0.8 * ATR * sqrt(24) ~ 3.9 * ATR. Bu zonadan TORROQ stop shovqin
+    # bilan urilib ketadi. Backtest (scripts/backtest.py --sweep):
+    #   ~1.5 ATR stop -> PF 1.05 ; 2.5 ATR -> 1.25 ; 3.5 ATR -> 1.44
+    # 3.5-4.5 ATR oralig'i barqaror plateau (3 spread x 5 bo'lakda ham PF > 1).
+    MIN_SL_ATR_MULT: float = 3.5
+
+    # Ochiq bitim necha soatdan keyin eskigan (yopilmagan) hisoblanadi.
+    # DIQQAT: backtestdagi MAX_HOLD_HOURS bilan bir xil bo'lishi kerak (scripts/backtest.py).
+    MAX_TRADE_HOURS: float = 24.0
+
     # Backtest natijalari qaysi spread bilan hisoblangan (hujjat/halollik uchun).
     # Broker spreadi boshqacha bo'lsa: python scripts/backtest.py --spreads ...
     BACKTEST_SPREAD_USD: float = 0.50

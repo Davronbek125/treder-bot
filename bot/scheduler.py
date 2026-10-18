@@ -188,13 +188,15 @@ def _process_open_trades(
             
             if hit_result == "TP1_HIT":
                 partial_pnl = calc_pnl(target_price, portion=0.5)
-                journal_service.mark_trade_tp1_hit(sig_id, break_even_sl=entry, partial_pnl=partial_pnl)
+                # SL BE ga SURILMAYDI - asl SL saqlanadi (backtest: BE ga surish foydani kamaytiradi)
+                journal_service.mark_trade_tp1_hit(sig_id, stop_loss=sl, partial_pnl=partial_pnl)
                 notifications.append((
                     user_id, 
                     f"✅ <b>TP1 Urib O'tildi! (Foyda qulflanmoqda)</b>\n"
                     f"#{sig_id} {action} bitimi TP1 ga yetdi ({target_price}$).\n"
-                    f"👉 Pozitsiya yarmi (0.5 yopildi): <b>{partial_pnl:+.2f}$</b>\n"
-                    f"🛡 Qolgan qismi uchun Stop Loss kirish narxiga ({entry}$) o'tkazildi (Breakeven)!"
+                    f"👉 Pozitsiyaning yarmi (0.5) yopildi: <b>{partial_pnl:+.2f}$</b>\n"
+                    f"🛡 Qolgan yarmi TP2/TP3 ni nishonga oladi. Stop Loss <b>o'zgartirilmadi</b> ({sl}$) — "
+                    f"narxga nafas olish imkoni beriladi."
                 ))
                 continue
                 
@@ -202,16 +204,17 @@ def _process_open_trades(
                 # Qolgan yoki butun pnl ni hisoblaymiz
                 portion_left = 0.5 if trade_state == 'TP1_HIT' else 1.0
                 final_pnl = existing_pnl + calc_pnl(target_price, portion=portion_left)
-                is_breakeven = trade_state == 'TP1_HIT' and hit_result == "LOSS"
-                # Breakeven: TP1 dagi qisman foyda saqlangan, demak natija WIN (yoki 0 bo'lsa LOSS emas)
-                if is_breakeven:
+                after_tp1_stop = trade_state == 'TP1_HIT' and hit_result == "LOSS"
+                # TP1 dagi qisman foyda saqlangan: yakuniy natija musbat bo'lsa WIN
+                if after_tp1_stop:
                     db_result = "WIN" if final_pnl > 0 else "LOSS"
                 else:
                     db_result = "WIN" if "WIN" in hit_result else "LOSS"
                 journal_service.mark_trade_closed(sig_id, db_result, pnl=final_pnl)
                 
-                icon = "🛡" if is_breakeven else "✅✅" if db_result == "WIN" else "❌"
-                txt_status = "Breakeven bilan yopildi" if is_breakeven else f"{hit_result} bilan yakunlandi"
+                icon = "🛡" if after_tp1_stop else "✅✅" if db_result == "WIN" else "❌"
+                txt_status = ("TP1 dan keyin SL (qisman foyda qulflandi)" if after_tp1_stop
+                              else f"{hit_result} bilan yakunlandi")
                 
                 notifications.append((
                     user_id, 
@@ -222,16 +225,17 @@ def _process_open_trades(
                 ))
                 continue
             
-            # 12 soatdan oshsa eskiradi
-            if diff_hours >= 12.0:
+            # Maksimal ushlash vaqti oshsa eskiradi (config.MAX_TRADE_HOURS, backtest bilan mos)
+            max_hours = float(settings.MAX_TRADE_HOURS)
+            if diff_hours >= max_hours:
                 # TP1 da olingan qisman foyda yo'qolmasligi kerak
                 journal_service.mark_trade_closed(sig_id, "EXPIRED", pnl=existing_pnl)
                 notifications.append((
                     user_id, 
-                    f"⚠️ <b>Bitim eskirgan!</b>\n#{sig_id} {action} bitimi 12 soatdan oshdi va yopilmagan deb topildi."
+                    f"⚠️ <b>Bitim eskirgan!</b>\n#{sig_id} {action} bitimi {max_hours:.0f} soatdan oshdi va yopilmagan deb topildi."
                 ))
-            # 4 soatdan oshsa ogohlantirish
-            elif diff_hours >= 4.0 and r.get('result') == 'OPEN':
+            # Yarim vaqtdan oshsa ogohlantirish
+            elif diff_hours >= max_hours / 2 and r.get('result') == 'OPEN':
                 journal_service.mark_trade_warned(sig_id)
                 notifications.append((
                     user_id, 

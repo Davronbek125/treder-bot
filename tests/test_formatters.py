@@ -16,6 +16,8 @@ def test_format_buy_signal_contains_levels_and_disclaimer():
     assert "Signal sifati" in text
     assert "moliyaviy maslahat emas" in text
     assert "/price" in text  # offset o'rnatilmagani haqida eslatma
+    # Yangi boshqaruv qoidasi: SL BE ga surilmaydi
+    assert "O'ZGARTIRMANG" in text
 
 
 def test_format_wait_signal_has_no_levels():

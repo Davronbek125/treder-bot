@@ -85,15 +85,21 @@ def test_offset_shifts_all_levels_equally():
 def test_levels_risk_reward_ratios():
     lv = _levels("BUY", 4140.0, 4.0, make_smc())
     sl_dist = 4140.0 - lv["stop_loss"]
-    assert sl_dist == pytest.approx(6.0)  # 1.5 * ATR
+    # SMC daraja yo'q -> minimal SL: MIN_SL_ATR_MULT * ATR = 3.5 * 4
+    assert sl_dist == pytest.approx(14.0)
     assert lv["tps"][0] - 4140.0 == pytest.approx(sl_dist * 1.5, abs=0.02)
     assert lv["tps"][2] - 4140.0 == pytest.approx(sl_dist * 4.0, abs=0.02)
 
 
-def test_levels_use_swing_for_stop_when_in_range():
-    smc = make_smc(recent_lows=[4132.0])  # 8$ pastda = 2 ATR (1..3 ATR oralig'ida)
-    lv = _levels("BUY", 4140.0, 4.0, smc)
-    assert lv["stop_loss"] == pytest.approx(4132.0 - 0.3 * 4.0)
+def test_levels_stop_outside_noise_band():
+    """SL hech qachon 3.5*ATR dan torroq bo'lmasligi kerak (shovqin zonasi)."""
+    # Yaqin SMC daraja (1.5 ATR) -> floor qo'llaniladi
+    near = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4134.0]))  # 6$ = 1.5 ATR
+    assert 4140.0 - near["stop_loss"] == pytest.approx(14.0)
+
+    # Uzoq SMC daraja (3.4 ATR) -> struktura hurmat qilinadi
+    far = _levels("BUY", 4140.0, 4.0, make_smc(recent_lows=[4126.4]))  # 13.6$ = 3.4 ATR
+    assert 4140.0 - far["stop_loss"] == pytest.approx(13.6 + 0.3 * 4.0)
 
 
 def test_daily_without_htf_is_normalized():

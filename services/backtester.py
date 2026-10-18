@@ -70,6 +70,7 @@ class BacktesterService:
                 sl = open_trade["sl"]
                 tp1 = open_trade["tp1"]
                 tp2 = open_trade.get("tp2", tp1)
+                tp3 = open_trade.get("tp3", tp2)
                 state = open_trade.get("state", "OPEN")
                 bars_held = i - open_trade["entry_idx"]
 
@@ -84,14 +85,14 @@ class BacktesterService:
                         elif curr_high >= tp2:
                             result, exit_price, closed = "WIN (TP2)", tp2, True
                         elif curr_high >= tp1:
-                            # TP1 urildi: yarmi yopiladi, qolgani uchun SL breakevenga suriladi
+                            # TP1 urildi: yarmi yopiladi, SL O'ZGARMAYDI (BE ga surilmaydi)
                             open_trade["state"] = "TP1_HIT"
                             open_trade["partial_r"] = pnl_r(open_trade, tp1, 0.5)
-                            open_trade["sl"] = open_trade["entry"]
-                            sl = open_trade["sl"]
                     elif state == "TP1_HIT":
                         if curr_low <= sl:
-                            result, exit_price, closed = "WIN (BE)", sl, True
+                            result, exit_price, closed = "WIN (TP1+SL)", sl, True
+                        elif curr_high >= tp3:
+                            result, exit_price, closed = "WIN (TP3)", tp3, True
                         elif curr_high >= tp2:
                             result, exit_price, closed = "WIN (TP2)", tp2, True
 
@@ -104,11 +105,11 @@ class BacktesterService:
                         elif curr_low <= tp1:
                             open_trade["state"] = "TP1_HIT"
                             open_trade["partial_r"] = pnl_r(open_trade, tp1, 0.5)
-                            open_trade["sl"] = open_trade["entry"]
-                            sl = open_trade["sl"]
                     elif state == "TP1_HIT":
                         if curr_high >= sl:
-                            result, exit_price, closed = "WIN (BE)", sl, True
+                            result, exit_price, closed = "WIN (TP1+SL)", sl, True
+                        elif curr_low <= tp3:
+                            result, exit_price, closed = "WIN (TP3)", tp3, True
                         elif curr_low <= tp2:
                             result, exit_price, closed = "WIN (TP2)", tp2, True
 
@@ -119,6 +120,8 @@ class BacktesterService:
                 if closed:
                     if open_trade.get("state") == "TP1_HIT":
                         final_r = round(open_trade.get("partial_r", 0.0) + pnl_r(open_trade, exit_price, 0.5), 2)
+                        if str(result).startswith("WIN (TP1+SL)") and final_r <= 0:
+                            result = "LOSS (TP1+SL)"
                     else:
                         final_r = pnl_r(open_trade, exit_price)
                     open_trade.update({
@@ -165,6 +168,7 @@ class BacktesterService:
                                     "sl": lv["stop_loss"],
                                     "tp1": tps[0],
                                     "tp2": tps[1] if len(tps) > 1 else tps[0],
+                                    "tp3": tps[2] if len(tps) > 2 else (tps[1] if len(tps) > 1 else tps[0]),
                                     "state": "OPEN",
                                     "strength": decision["strength"],
                                     "buy_votes": decision["buy_votes"],
